@@ -273,3 +273,74 @@ Meeseek is **not a single-shot prompt tool**. It is an **Agentic Operating Syste
 ### The Enterprise Value Proposition
 * **The Staff Engineer Multiplier**: Meeseek is not intended to replace the Principal Architect. It is designed to take the **60–70% of well-specified sprint tickets** (CRUD, API additions, schema migrations, bug fixes, UI components) and ship them certified with PRs and live previews in 3 minutes, liberating human engineers for high-level architecture.
 
+---
+
+## 9. Observability & Workflow State Machine: Console Dashboard Evolution 📊
+
+### 9.1 The Current Baseline: Linear Stepper
+Today's operator dashboard displays a linear 5-stage progress indicator:
+`Provisioned` ➔ `Seeded` ➔ `Implementing` ➔ `Tests passed` ➔ `PR opened`.
+
+**Limitations of the Current UI**:
+* **Overly Linear**: Software delivery is rarely purely linear. When Host Notary tests fail, the workflow enters a cyclic **Self-Correction Loop** rather than advancing forward.
+* **Lack of Granular Observability**: Intermediate agent turns, tool invocations, and live test stdout/stderr are hidden behind raw terminal dumps.
+* **Static Demo Artifacts**: Earlier test suites contained hardcoded test case counts rather than dynamic runtime metrics parsed from the active lease.
+
+### 9.2 The Next-Gen Workflow State Machine
+In the upcoming phase, the progress section will be overhauled into an interactive, real-time **State Machine DAG (Directed Acyclic Graph with Remediation Cycles)**:
+
+```
+[ 1. Provision Slot ] ──► [ 2. Ingest Rules & Schema ] ──► [ 3. In-Sandbox Coding ]
+                                                                     │
+                                                             Agent Done / Idle
+                                                                     ▼
+                                                          [ 4. Host Notary Test ]
+                                                                     │
+                                             ┌───────────────────────┴───────────────────────┐
+                                          PASS (Exit 0)                                FAIL (Exit != 0)
+                                             │                                               │
+                                             ▼                                               ▼
+                                    [ 6. Certified PR ]                         [ 5. Self-Correction Loop ]
+                                    - Git Push & PR Open                        - Capture stderr & traceback
+                                    - Live Tunnel Preview                       - Retry 1/2 in sandbox
+                                    - Jira Verification Card                                 │
+                                                                                Attempts >= 2?
+                                                                                ┌────┴────┐
+                                                                               YES        NO ──► [ 3. Coding ]
+                                                                                │
+                                                                                ▼
+                                                                        [ 7. Circuit Breaker ]
+                                                                        - meeseek:halt
+                                                                        - Human Alert in Jira
+```
+
+### 9.3 Architectural Decision: Deployment Strategy
+The team will evaluate two UI hosting models:
+1. **Model A: Embedded Single-Binary UI (FastAPI + Jinja + Tailwind)**
+   * *Pros*: Zero CORS issues, runs on the same port as the control plane (`:18000`), zero node/npm build dependencies in production GCE/VM environments.
+   * *Cons*: More complex custom state-rendering without modern reactive UI libraries.
+2. **Model B: Standalone Modern Dashboard (React 19 / Vite / React Flow)**
+   * *Pros*: First-class DAG visualization (using React Flow or VisX), rich component ecosystem, smooth animations for active agent loops.
+   * *Cons*: Requires separate build artifact, dual-port proxying or Caddy routing.
+
+---
+
+## 10. Future Roadmap: Resilience & Deep Self-Correction 🛣️
+
+### 10.1 Workspace Lifetime & Sliding-Window TTL Heartbeat
+* **The Risk**: Leases have a default TTL (`HOLODECK_TTL_S = 3600`). If an agent engages in heavy multi-turn reasoning, or if a ticket pauses in `WAITING_INPUT` while an engineer attends a meeting, the background reaper (`reaper.py`) could prematurely tear down the container.
+* **Proposed Mechanism**:
+  1. **Sliding-Window Activity Heartbeat**: Automatically extend the lease (`client.extend(lease_id, ttl_s=3600)`) on every agent turn, Notary verification run, or human interaction.
+  2. **Active-State Reaper Immunity**: The reaper must check `TaskRecord.workflow_state` before executing teardowns. Workspaces actively in `CODING`, `NOTARY_CORRECTING`, or `WAITING_INPUT` are immune from automatic reaping until genuinely abandoned.
+
+### 10.2 In-Sandbox Self-Correction Loop & Circuit Breaker Reset (`manager.py`)
+* **The Flow**:
+  1. Automated capture of failing `test_cmd` stdout/stderr upon Host Notary execution.
+  2. Re-injection of tracebacks into the active agent session (`driver.reiterate()`) up to `MAX_RETRIES = 2`.
+  3. **Circuit Breaker Halt & Triaging**: When retries are exhausted, the ticket halts with `meeseek:halt`.
+  4. **Human Reset Capabilities**:
+     * **In-Place Assisted Retry**: Replying `#meeseek retry <guidance>` resets the retry counter to 0 and re-arms the agent with the engineer's architectural clue.
+     * **Clean Restrike**: Replying `#meeseek reset` destroys the dirty workspace and strikes a clean snapshot from the Golden Image.
+
+
+
